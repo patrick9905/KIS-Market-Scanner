@@ -8,6 +8,7 @@ from typing import Any
 import requests
 
 from .config import Settings
+from .models import PriceSnapshot
 
 
 class KisApiError(RuntimeError):
@@ -18,6 +19,8 @@ class KisClient:
     TOKEN_PATH = "/oauth2/tokenP"
     VOLUME_RANK_PATH = "/uapi/domestic-stock/v1/quotations/volume-rank"
     VOLUME_RANK_TR_ID = "FHPST01710000"
+    CURRENT_PRICE_PATH = "/uapi/domestic-stock/v1/quotations/inquire-price"
+    CURRENT_PRICE_TR_ID = "FHKST01010100"
 
     def __init__(
         self,
@@ -56,14 +59,7 @@ class KisClient:
         token = self.get_access_token()
         response = self.session.get(
             f"{self.settings.base_url}{self.VOLUME_RANK_PATH}",
-            headers={
-                "content-type": "application/json; charset=utf-8",
-                "authorization": f"Bearer {token}",
-                "appkey": self.settings.app_key,
-                "appsecret": self.settings.app_secret,
-                "tr_id": self.VOLUME_RANK_TR_ID,
-                "custtype": "P",
-            },
+            headers=self._auth_headers(token, self.VOLUME_RANK_TR_ID),
             params={
                 "FID_COND_MRKT_DIV_CODE": "J",
                 "FID_COND_SCR_DIV_CODE": "20171",
@@ -86,8 +82,39 @@ class KisClient:
             raise KisApiError("거래량 순위 output 형식이 list가 아닙니다.")
         return output
 
+    def get_current_price(self, code: str) -> PriceSnapshot:
+        token = self.get_access_token()
+        response = self.session.get(
+            f"{self.settings.base_url}{self.CURRENT_PRICE_PATH}",
+            headers=self._auth_headers(token, self.CURRENT_PRICE_TR_ID),
+            params={
+                "FID_COND_MRKT_DIV_CODE": "J",
+                "FID_INPUT_ISCD": code,
+            },
+            timeout=self.settings.request_timeout_seconds,
+        )
+        payload = self._decode_response(response, action=f"현재가 조회({code})")
+        self._raise_for_kis_error(payload, action=f"현재가 조회({code})")
+        output = payload.get("output") or {}
+        if not isinstance(output, dict):
+            raise KisApiError("현재가 output 형식이 dict가 아닙니다.")
+        snapshot = PriceSnapshot.from_kis(code, output)
+        if not snapshot.is_valid():
+            raise KisApiError(f"현재가 조회({code}) 응답에 유효한 가격이 없습니다.")
+        return snapshot
+
     def check_connection(self) -> int:
         return len(self.get_volume_rank())
+
+    def _auth_headers(self, token: str, tr_id: str) -> dict[str, str]:
+        return {
+            "content-type": "application/json; charset=utf-8",
+            "authorization": f"Bearer {token}",
+            "appkey": self.settings.app_key,
+            "appsecret": self.settings.app_secret,
+            "tr_id": tr_id,
+            "custtype": "P",
+        }
 
     def _read_cached_token(self) -> str | None:
         path = self.settings.token_cache_path
@@ -138,4 +165,3 @@ class KisClient:
             code = payload.get("msg_cd", "UNKNOWN")
             message = payload.get("msg1", "알 수 없는 오류")
             raise KisApiError(f"{action} 실패: {code} {message}")
-

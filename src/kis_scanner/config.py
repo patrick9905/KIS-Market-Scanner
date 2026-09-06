@@ -15,6 +15,7 @@ class Settings:
     market_code: str = "1001"
     exclude_code: str = "000000"
     token_cache_path: Path = Path(".cache/kis-token.json")
+    database_path: Path = Path(".cache/kis-scanner.sqlite3")
     request_timeout_seconds: float = 10.0
 
     @classmethod
@@ -37,5 +38,7 @@ class Settings:
             ).rstrip("/"),
             market_code=os.getenv("KIS_MARKET_CODE", "1001").strip(),
             exclude_code=os.getenv("KIS_EXCLUDE_CODE", "000000").strip(),
+            database_path=Path(
+                os.getenv("KIS_DATABASE_PATH", ".cache/kis-scanner.sqlite3")
+            ),
         )
-

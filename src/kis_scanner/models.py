@@ -46,7 +46,28 @@ class StockSnapshot:
 
 
 @dataclass(frozen=True)
+class PriceSnapshot:
+    code: str
+    price: int
+    change_rate: float
+    accumulated_volume: int
+    accumulated_trade_value: int
+
+    @classmethod
+    def from_kis(cls, code: str, row: Mapping[str, Any]) -> "PriceSnapshot":
+        return cls(
+            code=code,
+            price=_integer(row.get("stck_prpr")),
+            change_rate=_number(row.get("prdy_ctrt")),
+            accumulated_volume=_integer(row.get("acml_vol")),
+            accumulated_trade_value=_integer(row.get("acml_tr_pbmn")),
+        )
+
+    def is_valid(self) -> bool:
+        return bool(self.code and self.price > 0)
+
+
+@dataclass(frozen=True)
 class ScoredStock:
     snapshot: StockSnapshot
     score: float
-

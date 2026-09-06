@@ -20,6 +20,7 @@ class FakeSession:
     def __init__(self) -> None:
         self.post_calls = 0
         self.last_params = None
+        self.last_tr_id = None
 
     def post(self, *_args, **_kwargs) -> FakeResponse:
         self.post_calls += 1
@@ -27,6 +28,19 @@ class FakeSession:
 
     def get(self, *_args, **kwargs) -> FakeResponse:
         self.last_params = kwargs["params"]
+        self.last_tr_id = kwargs["headers"]["tr_id"]
+        if self.last_tr_id == KisClient.CURRENT_PRICE_TR_ID:
+            return FakeResponse(
+                {
+                    "rt_cd": "0",
+                    "output": {
+                        "stck_prpr": "11000",
+                        "prdy_ctrt": "3.50",
+                        "acml_vol": "100000",
+                        "acml_tr_pbmn": "1100000000",
+                    },
+                }
+            )
         return FakeResponse(
             {
                 "rt_cd": "0",
@@ -57,6 +71,16 @@ def test_volume_rank_uses_configured_market(tmp_path: Path) -> None:
     rows = client.get_volume_rank()
     assert len(rows) == 1
     assert session.last_params["FID_INPUT_ISCD"] == "1001"
+
+
+def test_current_price_uses_stock_code(tmp_path: Path) -> None:
+    session = FakeSession()
+    client = KisClient(settings(tmp_path), session=session)
+    snapshot = client.get_current_price("005930")
+    assert snapshot.code == "005930"
+    assert snapshot.price == 11_000
+    assert session.last_tr_id == KisClient.CURRENT_PRICE_TR_ID
+    assert session.last_params["FID_INPUT_ISCD"] == "005930"
 
 
 def test_kis_error_is_not_silently_ignored() -> None:
