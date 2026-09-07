@@ -18,6 +18,7 @@ dev = ["pytest>=8,<9"]
 
 [project.scripts]
 kis-scan = "kis_scanner.cli:main"
+kis-bot = "kis_scanner.bot:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
@@ -25,4 +26,3 @@ where = ["src"]
 [tool.pytest.ini_options]
 pythonpath = ["src"]
 testpaths = ["tests"]
-

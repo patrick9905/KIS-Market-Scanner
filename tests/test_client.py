@@ -89,3 +89,26 @@ def test_kis_error_is_not_silently_ignored() -> None:
             {"rt_cd": "1", "msg_cd": "EGW00201", "msg1": "초당 거래건수 초과"},
             action="조회",
         )
+
+
+def test_daily_bars_are_sorted_and_request_adjusted_prices(tmp_path):
+    class DailySession(FakeSession):
+        def get(self, *_args, **kwargs):
+            self.last_params = kwargs['params']
+            self.last_tr_id = kwargs['headers']['tr_id']
+            return FakeResponse({'rt_cd': '0', 'output2': [
+                {'stck_bsop_date': d, 'stck_oprc': '100', 'stck_hgpr': '110',
+                 'stck_lwpr': '90', 'stck_clpr': '105', 'acml_vol': '200'}
+                for d in ('20260303', '20260302')]})
+
+    session = DailySession()
+    rows = KisClient(settings(tmp_path), session=session).get_daily_bars('005930', '2026-03-01', '2026-03-03')
+    assert [b.day for b in rows] == ['2026-03-02', '2026-03-03']
+    assert session.last_params['FID_ORG_ADJ_PRC'] == '0'
+    assert session.last_params['FID_INPUT_DATE_1'] == '20260301'
+    assert session.last_tr_id == 'FHKST03010100'
+
+
+def test_non_object_error_response_is_handled():
+    with pytest.raises(KisApiError):
+        KisClient._decode_response(FakeResponse([], status_code=500), action='test')

@@ -1,0 +1,15 @@
+{
+  "initial_cash": 10000000,
+  "risk_per_trade": 0.005,
+  "max_position": 0.15,
+  "max_exposure": 0.60,
+  "max_positions": 4,
+  "daily_loss": 0.02,
+  "max_drawdown": 0.10,
+  "stop_atr": 2.0,
+  "fee_bps": 5.0,
+  "sell_tax_bps": 20.0,
+  "slippage_bps": 10.0,
+  "benchmark": "069500",
+  "universe": ["005930", "000660", "035420", "005380", "051910"]
+}

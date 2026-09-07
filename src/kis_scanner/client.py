@@ -9,6 +9,7 @@ import requests
 
 from .config import Settings
 from .models import PriceSnapshot
+from .strategy import Bar
 
 
 class KisApiError(RuntimeError):
@@ -106,6 +107,35 @@ class KisClient:
     def check_connection(self) -> int:
         return len(self.get_volume_rank())
 
+    def get_daily_bars(self, code: str, start: str, end: str) -> list[Bar]:
+        response = self.session.get(
+            f'{self.settings.base_url}/uapi/domestic-stock/v1/quotations/inquire-daily-itemchartprice',
+            headers=self._auth_headers(self.get_access_token(), 'FHKST03010100'),
+            params={'FID_COND_MRKT_DIV_CODE': 'J', 'FID_INPUT_ISCD': code,
+                    'FID_INPUT_DATE_1': start.replace('-', ''),
+                    'FID_INPUT_DATE_2': end.replace('-', ''),
+                    'FID_PERIOD_DIV_CODE': 'D', 'FID_ORG_ADJ_PRC': '0'},
+            timeout=self.settings.request_timeout_seconds,
+        )
+        payload = self._decode_response(response, action='daily bars')
+        self._raise_for_kis_error(payload, action='daily bars')
+        rows = payload.get('output2')
+        if not isinstance(rows, list):
+            raise KisApiError('Missing daily bar output2')
+        bars = []
+        for row in rows:
+            if not isinstance(row, dict):
+                raise KisApiError('Invalid daily bar row')
+            if not row or not row.get('stck_bsop_date'):
+                continue
+            day = datetime.strptime(row['stck_bsop_date'], '%Y%m%d').date().isoformat()
+            bars.append(Bar(day, float(row['stck_oprc']), float(row['stck_hgpr']),
+                            float(row['stck_lwpr']), float(row['stck_clpr']), int(row['acml_vol'])))
+        bars.sort(key=lambda b: b.day)
+        if len({b.day for b in bars}) != len(bars):
+            raise KisApiError('Duplicate daily bars')
+        return bars
+
     def _auth_headers(self, token: str, tr_id: str) -> dict[str, str]:
         return {
             "content-type": "application/json; charset=utf-8",
@@ -152,11 +182,11 @@ class KisClient:
                 f"{action} 실패: HTTP {response.status_code}, JSON이 아닌 응답"
             ) from exc
 
+        if not isinstance(payload, dict):
+            raise KisApiError(f'{action}: expected a JSON object')
         if not response.ok:
             message = payload.get("msg1") or payload.get("error_description") or payload
             raise KisApiError(f"{action} 실패: HTTP {response.status_code}, {message}")
-        if not isinstance(payload, dict):
-            raise KisApiError(f"{action} 실패: JSON 객체가 아닌 응답")
         return payload
 
     @staticmethod
