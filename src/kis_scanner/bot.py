@@ -70,7 +70,8 @@ def run_once(client: KisClient, engine: PaperEngine, kill_file: Path) -> dict:
     engine.event('input', {'prices': prices, 'histories': {c: [asdict(b) for b in rows] for c, rows in histories.items()}})
     events = engine.cycle(observed, prices, histories, kill=kill_file.exists(),
                           allow_entries=clock_time(9, 10) <= observed.time() <= clock_time(15))
-    return {'status': 'ok', 'at': observed.isoformat(), 'events': events}
+    return {'status': 'ok', 'at': observed.isoformat(), 'events': events,
+            'daily_change': engine.equity_history(1)[-1]}
 
 
 def replay(data: dict[str, list[Bar]], cfg: BotConfig, db: Path, start: str, end: str) -> dict:
@@ -118,6 +119,10 @@ def main():
     run.add_argument('--kill-file', type=Path, default=Path('.cache/STOP'))
     status = sub.add_parser('status')
     status.add_argument('--db', type=Path, default=Path('.cache/paper.sqlite3'))
+    equity = sub.add_parser('equity', help='Daily paper equity and change from prior recorded day')
+    equity.add_argument('--db', type=Path, default=Path('.cache/paper.sqlite3'))
+    equity.add_argument('--days', type=int, default=30)
+    equity.add_argument('--json', action='store_true')
     halt = sub.add_parser('halt')
     halt.add_argument('--db', type=Path, default=Path('.cache/paper.sqlite3'))
     data = sub.add_parser('download')
@@ -152,9 +157,25 @@ def main():
             PaperEngine(args.db, cfg).event('dataset', {'sha256': report['dataset_sha256']})
             print(json.dumps(report, indent=2))
             return
-        if args.command in ('status', 'halt') and not args.db.exists():
+        if args.command in ('status', 'halt', 'equity') and not args.db.exists():
             raise ValueError('No paper account yet; run the bot first')
         engine = PaperEngine(args.db, cfg)
+        if args.command == 'equity':
+            rows = engine.equity_history(args.days)
+            if args.json:
+                print(json.dumps(rows, indent=2))
+            elif not rows:
+                print('No equity observations yet.')
+            else:
+                print('LOCAL PAPER / KRW / last recorded marks, not guaranteed closing prices')
+                print(f"{'Date':<10} {'Equity':>14} {'Cash':>14} {'Holdings':>14} {'Change':>13} {'Change%':>9} {'Baseline':<25}")
+                for row in rows:
+                    pct = f"{row['change_pct']:+.2f}%" if row['change_pct'] is not None else 'N/A'
+                    baseline = row['baseline_at'] or 'initial capital'
+                    print(f"{row['date']} {row['equity']:>14,.0f} {row['cash']:>14,.0f} "
+                          f"{row['holdings_value']:>14,.0f} {row['change_krw']:>+13,.0f} {pct:>9} {baseline}")
+                print(f"Last observed: {rows[-1]['observed_at']} (KST); no fresh quote fetched.")
+            return
         if args.command == 'halt':
             engine.halt()
             print('Halted persistently; positions exit on next successful in-session cycle.')

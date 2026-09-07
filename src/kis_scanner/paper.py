@@ -13,6 +13,24 @@ from .strategy import Bar, decide
 KST = timezone(timedelta(hours=9))
 
 
+def daily_equity(curve, initial_cash: float) -> list[dict]:
+    """Compare each KST day's last observation to the prior recorded day's last."""
+    last_by_day = {}
+    for stamp, equity, cash in sorted(curve, key=lambda row: datetime.fromisoformat(row[0])):
+        observed = datetime.fromisoformat(stamp).astimezone(KST)
+        last_by_day[observed.date().isoformat()] = (observed.isoformat(), equity, cash)
+    result = []
+    previous_at, previous_equity = None, initial_cash
+    for day, (stamp, equity, cash) in sorted(last_by_day.items()):
+        result.append(dict(date=day, observed_at=stamp, equity=equity, cash=cash,
+                           holdings_value=equity - cash, baseline_at=previous_at,
+                           baseline_kind='previous_recorded_day' if previous_at else 'initial_capital',
+                           baseline_equity=previous_equity, change_krw=equity - previous_equity,
+                           change_pct=(equity / previous_equity - 1) * 100 if previous_equity > 0 else None))
+        previous_at, previous_equity = stamp, equity
+    return result
+
+
 @dataclass(frozen=True)
 class BotConfig:
     initial_cash: float = 10_000_000
@@ -100,12 +118,24 @@ class PaperEngine:
         for _, equity, _ in curve:
             peak = max(peak, equity)
             drawdown = max(drawdown, 1 - equity / peak)
+        daily = daily_equity(curve, self.config.initial_cash)
         return dict(mode='local-paper', state=state, latest_equity=curve[-1] if curve else None,
+                    daily_change=daily[-1] if daily else None,
+                    average_sampled_exposure_pct=(sum((e - c) / e for _, e, c in curve if e > 0)
+                                                  / sum(e > 0 for _, e, _ in curve) * 100)
+                    if any(e > 0 for _, e, _ in curve) else None,
                     fills=fills, closed_trades=len(sells), recent_events=recent,
                     realized_pnl=sum(s['pnl'] for s in sells),
                     win_rate=sum(s['pnl'] > 0 for s in sells) / len(sells) if sells else None,
                     return_pct=((curve[-1][1] / self.config.initial_cash - 1) * 100) if curve else 0,
                     max_drawdown_pct=drawdown * 100)
+
+    def equity_history(self, days: int = 30) -> list[dict]:
+        if days < 1:
+            raise ValueError('days must be positive')
+        with self.connect() as db:
+            curve = db.execute('SELECT at,equity,cash FROM bot_equity ORDER BY at').fetchall()
+        return daily_equity(curve, self.config.initial_cash)[-days:]
 
     def halt(self):
         with self.connect() as db:
